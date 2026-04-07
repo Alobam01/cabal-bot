@@ -1,0 +1,7 @@
+python-telegram-bot==21.4
+telethon==1.36.0
+sqlalchemy[asyncio]==2.0.36
+asyncpg==0.30.0
+python-dotenv==1.0.1
+aiohttp==3.10.10
+psycopg2-binary==2.9.10
