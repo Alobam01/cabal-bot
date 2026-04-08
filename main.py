@@ -1,6 +1,7 @@
 import asyncio
 import os
 import json
+import re
 from sqlalchemy import text
 from datetime import datetime, timedelta
 from telegram import Update
@@ -23,6 +24,7 @@ YOUR_SOL_WALLET = "6oU4uLAfavhXWoF68rDNcChs7tzfs4AQ6Dq3VwwjWCLJ"
 
 tasks = {}  # user_id: task
 login_tasks = {}  # user_id: task
+DEFAULT_SOURCE_GROUPS = ["solearlytrending", "solwhaletrending"]
 
 # Conversation states
 PHONE, CODE = range(2)
@@ -45,7 +47,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/subscribe — Get SOL payment details\n"
         "/addgroups — Set your 3 cabal groups (one per line)\n"
         "/settarget — Set your private group\n"
-        "/train — Add past successful signals (one per message)\n"
+        "/train <CA or scanner link> — Add successful CA (build your dataset)\n"
         "/startlistening — Activate\n"
         "/stop — Stop listener\n"
         "/status — Check status\n"
@@ -198,7 +200,21 @@ async def settarget(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def train(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    example = update.message.text.split(maxsplit=1)[1] if len(update.message.text.split()) > 1 else update.message.text
+    text = update.message.text or ""
+    payload = text.split(maxsplit=1)[1] if len(text.split()) > 1 else ""
+    if not payload:
+        await update.message.reply_text("Usage: /train <CA or scanner link>")
+        return
+
+    scanner_match = re.search(r"(?:https?://)?t\.me/soul_scanner_bot\?start=([^\s&]+)", payload, re.IGNORECASE)
+    if scanner_match:
+        ca = scanner_match.group(1)
+        if ca.lower().startswith("ets_"):
+            ca = ca[len("ets_") :]
+        candidates = [ca.strip()]
+    else:
+        candidates = [line.strip() for line in payload.splitlines() if line.strip()]
+    candidates = [c for c in candidates if 8 <= len(c) <= 120]
     
     async with AsyncSessionLocal() as session:
         user = await session.get(UserConfig, user_id)
@@ -207,12 +223,16 @@ async def train(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         if not user.training_examples:
             user.training_examples = []
-        user.training_examples.append(example)
-        if len(user.training_examples) > 30:
-            user.training_examples = user.training_examples[-30:]
+        added = 0
+        for ca in candidates:
+            if ca not in user.training_examples:
+                user.training_examples.append(ca)
+                added += 1
+        if len(user.training_examples) > 500:
+            user.training_examples = user.training_examples[-500:]
         await session.commit()
     
-    await update.message.reply_text(f"✅ Training example added ({len(user.training_examples)} total)")
+    await update.message.reply_text(f"✅ Added {added} CA(s) ({len(user.training_examples)} total)")
 
 async def startlistening(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -224,8 +244,11 @@ async def startlistening(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await is_subscribed(user):
             await update.message.reply_text("Your trial expired or no active subscription. Use /subscribe")
             return
-        if not user.source_groups or not user.target_group:
-            await update.message.reply_text("Set groups with /addgroups and target with /settarget first")
+        if not user.target_group:
+            await update.message.reply_text("Set your target with /settarget first")
+            return
+        if not user.training_examples:
+            await update.message.reply_text("Add training CAs first with /train <CA or scanner link>")
             return
         
         if user.telegram_id in tasks and not tasks[user.telegram_id].done():
@@ -236,7 +259,7 @@ async def startlistening(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await session.commit()
     
     task = asyncio.create_task(
-        start_user_listener(user_id, user.session_string, user.source_groups, 
+        start_user_listener(user_id, user.session_string, user.source_groups or DEFAULT_SOURCE_GROUPS, 
                            user.target_group, user.training_examples or [], API_ID, API_HASH)
     )
     tasks[user_id] = task
