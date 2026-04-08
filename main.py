@@ -98,33 +98,38 @@ async def login(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id in login_tasks and not login_tasks[user_id].done():
         await update.message.reply_text("Login already in progress. Use the link I sent you.")
         return
-
-    await update.message.reply_text(
-        "Open the login link on the SAME phone where Telegram is installed, then approve the login.\n\n"
-        "If the tg:// link doesn't open, use the https://t.me/login link instead."
-    )
+    include_links = any(arg.lower() in {"links", "link"} for arg in (context.args or []))
+    await update.message.reply_text("Scan the QR in Telegram: Settings → Devices → Scan QR.")
 
     client = TelegramClient(StringSession(), API_ID, API_HASH)
     await client.connect()
     qr_login = await client.qr_login()
 
-    url = qr_login.url
-    await update.message.reply_text("Option A (tap on mobile):")
-    await update.message.reply_text(url)
-    if url.startswith("tg://login?token="):
-        await update.message.reply_text("Option B (open in browser):")
-        await update.message.reply_text(url.replace("tg://login?token=", "https://t.me/login?token="))
-    try:
-        import qrcode
+    async def send_login_artifacts(url: str, prefix_text: str | None = None):
+        if prefix_text:
+            await update.message.reply_text(prefix_text)
+        if include_links:
+            await update.message.reply_text(url)
+            if url.startswith("tg://login?token="):
+                await update.message.reply_text(url.replace("tg://login?token=", "https://t.me/login?token="))
+                await update.message.reply_text(url.replace("tg://login?token=", "https://telegram.me/login?token="))
+        try:
+            import qrcode
 
-        img = qrcode.make(url)
-        bio = io.BytesIO()
-        bio.name = "login_qr.png"
-        img.save(bio, format="PNG")
-        bio.seek(0)
-        await update.message.reply_photo(bio, caption="Option C (recommended): Telegram → Settings → Devices → Scan QR")
-    except Exception:
-        pass
+            img = qrcode.make(url)
+            bio = io.BytesIO()
+            bio.name = "login_qr.png"
+            img.save(bio, format="PNG")
+            bio.seek(0)
+            await update.message.reply_photo(
+                bio,
+                caption="Scan QR in Telegram. If you have one device, use Upload from Gallery when available.",
+            )
+        except Exception:
+            if include_links:
+                await update.message.reply_text("QR image generation failed on server. Use the login links above.")
+
+    await send_login_artifacts(qr_login.url)
 
     async def waiter():
         nonlocal qr_login
@@ -135,24 +140,7 @@ async def login(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     break
                 except asyncio.TimeoutError:
                     qr_login = await client.qr_login()
-                    url = qr_login.url
-                    await update.message.reply_text("Login link expired. Here is a fresh one:")
-                    await update.message.reply_text("Option A (tap on mobile):")
-                    await update.message.reply_text(url)
-                    if url.startswith("tg://login?token="):
-                        await update.message.reply_text("Option B (open in browser):")
-                        await update.message.reply_text(url.replace("tg://login?token=", "https://t.me/login?token="))
-                    try:
-                        import qrcode
-
-                        img = qrcode.make(url)
-                        bio = io.BytesIO()
-                        bio.name = "login_qr.png"
-                        img.save(bio, format="PNG")
-                        bio.seek(0)
-                        await update.message.reply_photo(bio, caption="Telegram → Settings → Devices → Scan QR")
-                    except Exception:
-                        pass
+                    await send_login_artifacts(qr_login.url, prefix_text="New login QR generated.")
             else:
                 await update.message.reply_text("Login failed: timed out waiting for approval.")
                 return
