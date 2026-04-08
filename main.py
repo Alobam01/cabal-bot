@@ -40,18 +40,24 @@ async def is_subscribed(user):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "👋 Welcome to **Cabal CA Filter SaaS**\n\n"
+        "👋 Welcome to **Cabal Filter**\n\n"
+        "This bot monitors Solana scanner feeds, extracts the CA from scanner links, scores it using your training dataset, and forwards only high-quality matches to your private group.\n\n"
+        "Quick setup:\n"
+        "1) /login (scan QR)\n"
+        "2) /settarget <your private group @username or -100...>\n"
+        "3) /train <CA or scanner link> (repeat for your successful coins)\n"
+        "4) /startlistening\n\n"
         "Commands:\n"
-        "/login — Login (QR, recommended)\n"
-        "/login_code — Login with your phone (less reliable)\n"
-        "/plans — See pricing\n"
-        "/subscribe — Get SOL payment details\n"
-        "/addgroups — Set your 3 cabal groups (one per line)\n"
+        "/login — Login (QR)\n"
+        "/login links — Login + show links\n"
+        "/login_code — Login with phone code (can be blocked)\n"
         "/settarget — Set your private group\n"
-        "/train <CA or scanner link> — Add successful CA (build your dataset)\n"
-        "/startlistening — Activate\n"
+        "/train — Add successful CAs to your dataset\n"
+        "/startlistening — Start filtering + forwarding\n"
         "/stop — Stop listener\n"
         "/status — Check status\n"
+        "/plans — See pricing\n"
+        "/subscribe — Get SOL payment details\n"
         "/checkpayment <tx> — Submit payment tx"
     )
 
@@ -99,7 +105,13 @@ async def login(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Login already in progress. Use the link I sent you.")
         return
     include_links = any(arg.lower() in {"links", "link"} for arg in (context.args or []))
-    await update.message.reply_text("Scan the QR in Telegram: Settings → Devices → Scan QR.")
+    await update.message.reply_text(
+        "Scan the QR in Telegram: Settings → Devices → Scan QR.\n\n"
+        "After login:\n"
+        "1) /settarget <your private group>\n"
+        "2) /train <CA or scanner link> (add multiple successful coins)\n"
+        "3) /startlistening"
+    )
 
     client = TelegramClient(StringSession(), API_ID, API_HASH)
     await client.connect()
