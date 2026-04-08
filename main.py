@@ -2,6 +2,7 @@ import asyncio
 import os
 import json
 import re
+import io
 from sqlalchemy import text
 from datetime import datetime, timedelta
 from telegram import Update
@@ -108,24 +109,50 @@ async def login(update: Update, context: ContextTypes.DEFAULT_TYPE):
     qr_login = await client.qr_login()
 
     url = qr_login.url
+    await update.message.reply_text("Option A (tap on mobile):")
     await update.message.reply_text(url)
     if url.startswith("tg://login?token="):
+        await update.message.reply_text("Option B (open in browser):")
         await update.message.reply_text(url.replace("tg://login?token=", "https://t.me/login?token="))
+    try:
+        import qrcode
+
+        img = qrcode.make(url)
+        bio = io.BytesIO()
+        bio.name = "login_qr.png"
+        img.save(bio, format="PNG")
+        bio.seek(0)
+        await update.message.reply_photo(bio, caption="Option C (recommended): Telegram → Settings → Devices → Scan QR")
+    except Exception:
+        pass
 
     async def waiter():
         nonlocal qr_login
         try:
-            for _ in range(3):
+            for _ in range(5):
                 try:
-                    await asyncio.wait_for(qr_login.wait(), timeout=180)
+                    await asyncio.wait_for(qr_login.wait(), timeout=600)
                     break
                 except asyncio.TimeoutError:
                     qr_login = await client.qr_login()
                     url = qr_login.url
                     await update.message.reply_text("Login link expired. Here is a fresh one:")
+                    await update.message.reply_text("Option A (tap on mobile):")
                     await update.message.reply_text(url)
                     if url.startswith("tg://login?token="):
+                        await update.message.reply_text("Option B (open in browser):")
                         await update.message.reply_text(url.replace("tg://login?token=", "https://t.me/login?token="))
+                    try:
+                        import qrcode
+
+                        img = qrcode.make(url)
+                        bio = io.BytesIO()
+                        bio.name = "login_qr.png"
+                        img.save(bio, format="PNG")
+                        bio.seek(0)
+                        await update.message.reply_photo(bio, caption="Telegram → Settings → Devices → Scan QR")
+                    except Exception:
+                        pass
             else:
                 await update.message.reply_text("Login failed: timed out waiting for approval.")
                 return
