@@ -99,26 +99,57 @@ async def login(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await update.message.reply_text(
-        "Open this Telegram login link on your phone (where Telegram is installed) and approve the login.\n\n"
-        "If the link doesn't open, copy/paste it into a browser on the same device."
+        "Open the login link on the SAME phone where Telegram is installed, then approve the login.\n\n"
+        "If the tg:// link doesn't open, use the https://t.me/login link instead."
     )
 
     client = TelegramClient(StringSession(), API_ID, API_HASH)
     await client.connect()
     qr_login = await client.qr_login()
 
-    await update.message.reply_text(qr_login.url)
+    url = qr_login.url
+    await update.message.reply_text(url)
+    if url.startswith("tg://login?token="):
+        await update.message.reply_text(url.replace("tg://login?token=", "https://t.me/login?token="))
 
     async def waiter():
+        nonlocal qr_login
         try:
-            await qr_login.wait()
-            session_string = client.session.save()
-            await _finalize_login(user_id, session_string)
-            await update.message.reply_text("✅ Login successful! Session saved.\nNow set your groups with /addgroups")
+            for _ in range(3):
+                try:
+                    await asyncio.wait_for(qr_login.wait(), timeout=180)
+                    break
+                except asyncio.TimeoutError:
+                    qr_login = await client.qr_login()
+                    url = qr_login.url
+                    await update.message.reply_text("Login link expired. Here is a fresh one:")
+                    await update.message.reply_text(url)
+                    if url.startswith("tg://login?token="):
+                        await update.message.reply_text(url.replace("tg://login?token=", "https://t.me/login?token="))
+            else:
+                await update.message.reply_text("Login failed: timed out waiting for approval.")
+                return
+
+            try:
+                session_string = client.session.save()
+                await _finalize_login(user_id, session_string)
+                await update.message.reply_text("✅ Login successful! Session saved.\nNow set your groups with /addgroups")
+            except SessionPasswordNeededError:
+                password = os.getenv("TG_2FA_PASSWORD")
+                if not password:
+                    await update.message.reply_text(
+                        "Login needs your Telegram 2FA password.\n\n"
+                        "Set TG_2FA_PASSWORD in your environment (Render env vars) and run /login again."
+                    )
+                    return
+                await client.sign_in(password=password)
+                session_string = client.session.save()
+                await _finalize_login(user_id, session_string)
+                await update.message.reply_text("✅ Login successful! Session saved.\nNow set your groups with /addgroups")
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            await update.message.reply_text(f"Login failed: {e}")
+            await update.message.reply_text(f"Login failed ({type(e).__name__}): {e}")
         finally:
             try:
                 await client.disconnect()
